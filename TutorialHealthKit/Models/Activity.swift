@@ -5,7 +5,6 @@
 //  Created by Ellen Schrader on 30/03/2025.
 //
 
-import Foundation
 import SwiftUI
 
 struct Activity  : Identifiable, Hashable{
