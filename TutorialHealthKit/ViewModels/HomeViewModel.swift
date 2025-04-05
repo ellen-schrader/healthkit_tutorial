@@ -7,6 +7,14 @@
 
 import Foundation
 
+extension String {
+    func toDoubleFromFormattedNumber() -> Double? {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.number(from: self)?.doubleValue
+    }
+}
+
 
 class HomeViewModel: ObservableObject {
     
@@ -15,6 +23,7 @@ class HomeViewModel: ObservableObject {
     @Published var calories: Int = 0
     @Published var exercise: Int = 0
     @Published var stand: Int = 0
+    @Published var activities: [Activity] = []
     
 
     @Published var mockActivities: [Activity] = [
@@ -58,7 +67,10 @@ class HomeViewModel: ObservableObject {
                 try await healthManager.requestAuthorization()
                 fetchTodayCaloriesBurned()
                 fetchTodayExerciseTime()
-                fetchTodayStandHours()}
+                fetchTodayStandHours()
+                fetchTodaySteps()
+                fetchWorkoutStats()
+            }
             catch {
                 print(error.localizedDescription)
             }
@@ -68,9 +80,10 @@ class HomeViewModel: ObservableObject {
     func fetchTodayCaloriesBurned() {
         healthManager.fetchTodayCaloriesBurned { result in
             switch result {
-            case .success(let calories):
+            case .success(let activity):
                 DispatchQueue.main.async {
-                    self.calories = Int(calories)
+                    self.calories = Int(activity.amount.toDoubleFromFormattedNumber() ?? 0)
+                    self.activities.append(activity)
                 }
             case .failure(let error):
                 print("Error fetching calories: \(error)")
@@ -107,6 +120,36 @@ class HomeViewModel: ObservableObject {
             }
         }
         
+    }
+    
+    //MARK: Fitness Activity
+    
+    func fetchTodaySteps(){
+        healthManager.fetchTodaySteps{
+            result in
+            switch result {
+            case .success(let steps):
+                DispatchQueue.main.async {
+                    self.activities.append(steps)
+                }
+            case .failure(let error):
+                print("Error fetching steps: \(error)")
+            }
+        }
+    }
+    
+    func fetchWorkoutStats(){
+        healthManager.fetchCurrentWeeksWorkoutStats{
+            result in
+            switch result {
+            case .success(let stats):
+                DispatchQueue.main.async {
+                    self.activities.append(contentsOf: stats)
+                }
+            case .failure(let error):
+                print("Error fetching workout stats: \(error)")
+            }
+        }
     }
     
 }

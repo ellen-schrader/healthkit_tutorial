@@ -86,7 +86,7 @@ struct HomeView: View {
                     .padding(.horizontal)
                     
                     LazyVGrid(columns: Array(repeating: GridItem(spacing:10), count:2)){
-                        ForEach(viewModel.mockActivities){ activity in
+                        ForEach(viewModel.activities.sorted(by: { $0.id < $1.id })){ activity in
                             ActivityCard(activity: activity)
                         }
                     }
