@@ -9,9 +9,12 @@ import Foundation
 
 
 class HomeViewModel: ObservableObject {
-    var calories: Int = 123
-    var activity: Int = 45
-    var stand: Int = 12
+    
+    let healthManager = HealthManager.shared
+    
+    @Published var calories: Int = 0
+    @Published var exercise: Int = 0
+    @Published var stand: Int = 0
     
 
     @Published var mockActivities: [Activity] = [
@@ -47,5 +50,63 @@ class HomeViewModel: ObservableObject {
         Workout(id: 2, title: "Strength Training", imageName: "figure.strengthtraining.traditional", duration: "56 min", date: Date().formatted(.dateTime.month().day()), calories: "402 kcal", tintColor: .cyan),
         Workout(id: 3, title: "Walk", imageName: "figure.walk", duration: "75 min", date: Date().formatted(.dateTime.month().day()), calories: "202 kcal", tintColor: .cyan)
     ]
+    
+    
+    init() {
+        Task {
+            do{
+                try await healthManager.requestAuthorization()
+                fetchTodayCaloriesBurned()
+                fetchTodayExerciseTime()
+                fetchTodayStandHours()}
+            catch {
+                print(error.localizedDescription)
+            }
+        }
+    }
+    
+    func fetchTodayCaloriesBurned() {
+        healthManager.fetchTodayCaloriesBurned { result in
+            switch result {
+            case .success(let calories):
+                DispatchQueue.main.async {
+                    self.calories = Int(calories)
+                }
+            case .failure(let error):
+                print("Error fetching calories: \(error)")
+            }
+        }
+    }
+    
+    func fetchTodayExerciseTime(){
+        healthManager.fetchTodayExerciseTime{
+            result in
+            switch result {
+            case .success(let time):
+                DispatchQueue.main.async {
+                    self.exercise = Int(time)
+                    print("Exercise time: \(self.exercise)")
+                }
+                
+            case .failure(let error):
+                print("Error fetching exercise time: \(error)")
+            }
+        }
+    }
+    
+    func fetchTodayStandHours() {
+        healthManager.fetchTodayStandHours{
+            result in
+            switch result {
+            case .success(let hours):
+                DispatchQueue.main.async {
+                    self.stand = hours
+                }
+            case .failure(let error):
+                print("Error fetching stand: \(error)")
+            }
+        }
+        
+    }
     
 }
