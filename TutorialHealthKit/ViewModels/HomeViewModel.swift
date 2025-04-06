@@ -24,6 +24,7 @@ class HomeViewModel: ObservableObject {
     @Published var exercise: Int = 0
     @Published var stand: Int = 0
     @Published var activities: [Activity] = []
+    @Published var workouts: [Workout] = []
     
 
     @Published var mockActivities: [Activity] = [
@@ -70,6 +71,7 @@ class HomeViewModel: ObservableObject {
                 fetchTodayStandHours()
                 fetchTodaySteps()
                 fetchWorkoutStats()
+                fetchRecentWorkouts(month: Date(), numberOfWorkouts: 5)
             }
             catch {
                 print(error.localizedDescription)
@@ -148,6 +150,20 @@ class HomeViewModel: ObservableObject {
                 }
             case .failure(let error):
                 print("Error fetching workout stats: \(error)")
+            }
+        }
+    }
+    
+    func fetchRecentWorkouts(month: Date, numberOfWorkouts: Int){
+        healthManager.fetchWorkoutsForMonth(month: month){
+            result in
+            switch result {
+            case .success(let workouts):
+                DispatchQueue.main.async {
+                    self.workouts = Array(workouts.prefix(numberOfWorkouts))
+                }
+            case .failure(let error):
+                print("Error fetching workouts: \(error)")
             }
         }
     }

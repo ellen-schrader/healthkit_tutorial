@@ -111,7 +111,7 @@ struct HomeView: View {
                     
                     
                     LazyVGrid(columns: Array(repeating: GridItem(), count:1)){
-                        ForEach(viewModel.mockWorkouts){ workout in
+                        ForEach(viewModel.workouts){ workout in
                             WorkoutCard(workout: workout)
                         }
                     }
