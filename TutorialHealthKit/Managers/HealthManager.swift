@@ -68,21 +68,6 @@ class HealthManager {
         healthStore.execute(query)
     }
     
-    //    func fetchTodayExerciseTime(completion: @escaping(Result<Double, Error>) -> Void){
-    //        let exercise = HKQuantityType(.appleExerciseTime)
-    //        let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
-    //        let query = HKStatisticsQuery(quantityType: exercise, quantitySamplePredicate: predicate) { _, results, error in
-    //            guard let quantity = results?.sumQuantity() , error == nil else {
-    //                completion(.failure(NSError()))
-    //                return
-    //            }
-    //
-    //            let exerciseTime = quantity.doubleValue(for: .minute())
-    //            completion(.success(exerciseTime))
-    //        }
-    //        healthStore.execute(query)
-    //    }
-    
     func fetchTodayExerciseTime(completion: @escaping(Result<Double, Error>) -> Void) {
         let exercise = HKQuantityType(.appleExerciseTime)
         let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
@@ -109,7 +94,6 @@ class HealthManager {
                 completion(.failure(error ?? NSError(domain: "HealthKit", code: 1)))
                 return
             }
-            print("Workout: \(workouts)")
             let totalMinutes = workouts.reduce(0.0) { $0 + $1.duration / 60.0 }
             completion(.success(totalMinutes))
         }
@@ -168,7 +152,9 @@ class HealthManager {
             var stats: [HKWorkoutActivityType: Int] = [:]
             let includedTypes: [HKWorkoutActivityType] = [.running, .traditionalStrengthTraining, .walking, .cooldown, .yoga]
             
-            for workout in workouts {
+            let filteredWorkouts = self.filterOverlappingWorkouts(workouts)
+            
+            for workout in filteredWorkouts {
                 let type = workout.workoutActivityType
                 guard includedTypes.contains(type) else { continue }
                 
@@ -208,9 +194,10 @@ class HealthManager {
                 return
             }
             
+            let filteredWorkouts = self.filterOverlappingWorkouts(workouts)
             
-            let formattedWorkouts: [Workout] = workouts.enumerated().map { index, workout in
-                print(workout.workoutActivityType.rawValue)
+            
+            let formattedWorkouts: [Workout] = filteredWorkouts.enumerated().map { index, workout in
                 
                 let energyType = HKQuantityType(.activeEnergyBurned)
                 let calories = workout.statistics(for: energyType)?
@@ -230,6 +217,23 @@ class HealthManager {
         
         healthStore.execute(query)
         
+    }
+    
+    func filterOverlappingWorkouts(_ workouts: [HKWorkout]) -> [HKWorkout] {
+        let watchWorkouts = workouts.filter { workout in
+                workout.device?.model?.lowercased().contains("watch") ?? false
+            }
+       
+        let otherWorkouts = workouts.filter { workout in
+            !(workout.device?.model?.lowercased().contains("watch") ?? false)
+        }
+        
+        var filteredWorkouts: [HKWorkout] = otherWorkouts.filter { workout in
+            !watchWorkouts.contains { $0.startDate <= workout.endDate || workout.startDate  <= $0.endDate }
+        }
+        
+        filteredWorkouts.append(contentsOf: watchWorkouts)
+        return filteredWorkouts.sorted { $0.startDate > $1.startDate }
     }
     
 }

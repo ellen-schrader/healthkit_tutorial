@@ -71,7 +71,8 @@ class HomeViewModel: ObservableObject {
                 fetchTodayStandHours()
                 fetchTodaySteps()
                 fetchWorkoutStats()
-                fetchRecentWorkouts(month: Date(), numberOfWorkouts: 5)
+                fetchRecentWorkouts(month: Date(), numberOfWorkouts: 10)
+                
             }
             catch {
                 print(error.localizedDescription)
