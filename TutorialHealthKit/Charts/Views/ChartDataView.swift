@@ -10,7 +10,7 @@ import Charts
 
 struct ChartDataView: View {
     var average: Double
-    var total: Int
+    var total: Double
     var body: some View {
         HStack{
             Spacer()
@@ -34,7 +34,7 @@ struct ChartDataView: View {
                 Text("Total")
                     .foregroundColor(.secondary)
                     .font(.title3)
-                Text("\(total)")
+                Text(total.formattedNumberString())
                     .font(.title2)
                     .bold()
             }

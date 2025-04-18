@@ -9,16 +9,6 @@ import Foundation
 import HealthKit
 import SwiftUI
 
-extension Double {
-    func formattedNumberString() -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        formatter.locale = Locale(identifier: "en_US") // Ensures 1,000 instead of 1.000
-        return formatter.string(from: NSNumber(value: self)) ?? "0"
-    }
-}
-
 class HealthManager {
     static let shared = HealthManager()
     

@@ -7,15 +7,6 @@
 
 import Foundation
 
-extension String {
-    func toDoubleFromFormattedNumber() -> Double? {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.number(from: self)?.doubleValue
-    }
-}
-
-
 class HomeViewModel: ObservableObject {
     
     let healthManager = HealthManager.shared

@@ -53,7 +53,7 @@ extension ChartOptions {
 
 class ChartsViewModel: ObservableObject {
     @Published var averages: [ChartOptions: Double]
-    @Published var totals: [ChartOptions: Int]
+    @Published var totals: [ChartOptions: Double]
     
     let healthManager = HealthManager.shared
     @Published var dataMonthly: [ChartOptions: [GraphDataPoint]]
@@ -103,11 +103,11 @@ class ChartsViewModel: ObservableObject {
         
         
         
-        totals[.oneWeek] = dataDaily[.oneWeek]!.map { $0.count }.reduce(0, +)
-        totals[.oneMonth] = dataDaily[.oneMonth]!.map { $0.count }.reduce(0, +)
-        totals[.threeMonths] = dataDaily[.threeMonths]!.map { $0.count }.reduce(0, +)
-        totals[.oneYear] = dataDaily[.oneYear]!.map { $0.count }.reduce(0, +)
-        totals[.allTime] = dataDaily[.allTime]!.map { $0.count }.reduce(0, +)
+        totals[.oneWeek] = dataDaily[.oneWeek]!.map { Double($0.count) }.reduce(0, +)
+        totals[.oneMonth] = dataDaily[.oneMonth]!.map { Double($0.count) }.reduce(0, +)
+        totals[.threeMonths] = dataDaily[.threeMonths]!.map { Double($0.count) }.reduce(0, +)
+        totals[.oneYear] = dataDaily[.oneYear]!.map {Double($0.count) }.reduce(0, +)
+        totals[.allTime] = dataDaily[.allTime]!.map { Double($0.count) }.reduce(0, +)
           
         averages[.oneWeek] = Double(totals[.oneWeek]!) / Double(dataDaily[.oneWeek]!.count)
         averages[.oneMonth] = Double(totals[.oneMonth]!) / Double(dataDaily[.oneMonth]!.count)
@@ -164,7 +164,7 @@ class ChartsViewModel: ObservableObject {
             return
         }
         let totalSteps = data.reduce(0.0, { $0 + $1.total})
-        self.totals[chartOption] = Int(totalSteps)
+        self.totals[chartOption] = totalSteps
         
         let totalDays = data.reduce(0, { $0 + $1.daysInPeriod })
         let average = totalDays > 0 ? Double(totalSteps) / Double(totalDays) : 0
@@ -181,7 +181,7 @@ class ChartsViewModel: ObservableObject {
                     case .success(let data):
                         DispatchQueue.main.async{
                             self.dataDaily[chartOption] = data
-                            self.totals[chartOption] = data.reduce(0, {$0 + $1.count})
+                            self.totals[chartOption] = data.reduce(0, {$0 + Double($1.count)})
                             self.averages[chartOption] = data.reduce(0.0, {$0 + Double($1.count)})/Double(data.count)
                         }
                     case .failure(let failure):
