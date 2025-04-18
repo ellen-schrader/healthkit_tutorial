@@ -10,6 +10,8 @@ import Foundation
 struct GraphDataPoint: Identifiable {
     let id = UUID()
     let date: Date
-    let mean: Double
+    let value: Double
     let stdDev: Double
+    let total: Double
+    let daysInPeriod: Int
 }

@@ -9,7 +9,7 @@ import Charts
 
 struct CountBarView: View {
     var data: [CountDataPoint]
-    var timeUnit: Calendar.Component = .day // default to .day
+    var timeUnit: TimeUnit = .day // default to .day
     var goal: Int = 0
     
     var body: some View {
@@ -17,7 +17,7 @@ struct CountBarView: View {
             Chart {
                 ForEach(data) { item in
                     BarMark(
-                        x: .value("Date", item.date, unit: timeUnit),
+                        x: .value("Date", item.date, unit: timeUnit.calendarComponent),
                         y: .value("Mean", item.count)
                     )
                     .foregroundStyle(item.count > goal ? .green : .gray)

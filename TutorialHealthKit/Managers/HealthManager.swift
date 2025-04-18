@@ -237,3 +237,168 @@ class HealthManager {
     }
     
 }
+extension HealthManager {
+    func fetchEarliestStepDate(completion: @escaping (Date?) -> Void) {
+        let steps = HKQuantityType(.stepCount)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(
+            sampleType: steps,
+            predicate: nil,
+            limit: 1,
+            sortDescriptors: [sortDescriptor]
+        ) { _, samples, error in
+            guard let firstSample = samples?.first as? HKQuantitySample, error == nil else {
+                print("Error fetching earliest step data: \(error?.localizedDescription ?? "Unknown error")")
+                completion(nil)
+                return
+            }
+            
+            completion(firstSample.startDate)
+        }
+        
+        healthStore.execute(query)
+    }
+    
+    func calculateNumberOfUnits(from startDate: Date, to endDate: Date, unit: TimeUnit) -> Int {
+        let calendar = Calendar.current
+        let components: Set<Calendar.Component> = [unit.calendarComponent]
+
+        
+        let dateComponents = calendar.dateComponents(components, from: startDate, to: endDate)
+        
+        return dateComponents.value(for: unit.calendarComponent) ?? 0
+    }
+    
+    func fetchAllTimeStepsData(timeUnit: TimeUnit, completion: @escaping (Result<[GraphDataPoint], Error>) -> Void) {
+        fetchEarliestStepDate { [weak self] earliestDate in
+            guard let self = self, let earliestDate = earliestDate else {
+                completion(.failure(NSError(domain: "HealthKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not determine earliest date"])))
+                return
+            }
+            
+            let (startDate, _) = timeUnit.getStartAndEndDates(for: earliestDate)
+            
+            let today = Date()
+            let count = self.calculateNumberOfUnits(from: startDate, to: today, unit: timeUnit) + 1
+            
+            self.fetchStepsGraphChartData(count: count, timeUnit: timeUnit, completion: completion)
+        }
+    }
+    func fetchStepsGraphChartData(count: Int, timeUnit: TimeUnit, completion: @escaping (Result<[GraphDataPoint], Error>) -> Void) {
+        let steps = HKQuantityType(.stepCount)
+        var graphData = [GraphDataPoint]()
+        let group = DispatchGroup()
+        let calendar = Calendar.current
+        let today = Date()
+        
+        for i in 0..<count {
+            group.enter()
+            guard let periodDate = calendar.date(byAdding: timeUnit.calendarComponent, value: -i, to: Date()) else {
+                group.leave()
+                continue
+            }
+            let (startOfPeriod, endOfPeriod) = timeUnit.getStartAndEndDates(for: periodDate)
+            
+            let actualEndDate = i == 0 ? min(endOfPeriod, today) : endOfPeriod
+            
+            let predicate = HKQuery.predicateForSamples(withStart: startOfPeriod, end: actualEndDate)
+            
+            let interval = DateComponents(day: 1)
+            let anchorDate = calendar.startOfDay(for: startOfPeriod)
+            
+            let query = HKStatisticsCollectionQuery(quantityType: steps,
+                                                quantitySamplePredicate: predicate,
+                                                options: .cumulativeSum,
+                                                anchorDate: anchorDate,
+                                                intervalComponents: interval)
+            
+            query.initialResultsHandler = { _, statisticsCollection, error in
+                defer { group.leave() }
+                
+                guard let statisticsCollection = statisticsCollection, error == nil else {
+                    print("Error: \(error?.localizedDescription ?? "Unknown error")")
+                    return
+                }
+                
+                var dailyTotals: [Double] = []
+                statisticsCollection.enumerateStatistics(from: startOfPeriod, to: actualEndDate) { statistics, _ in
+                    if let quantity = statistics.sumQuantity() {
+                        let steps = quantity.doubleValue(for: .count())
+                        dailyTotals.append(steps)
+                    } else {
+                        dailyTotals.append(0)
+                    }
+                }
+                
+                guard !dailyTotals.isEmpty else { return }
+                
+                let cumulativeSum = dailyTotals.reduce(0, +)
+                
+                let totalDaysInPeriod = calendar.dateComponents([.day], from: startOfPeriod, to: actualEndDate).day! + 1
+                let dailyMean = cumulativeSum / Double(totalDaysInPeriod)
+                let mean = dailyTotals.reduce(0, +) / Double(dailyTotals.count)
+                let variance = dailyTotals.reduce(0) { $0 + pow($1 - mean, 2) } / Double(dailyTotals.count)
+                let stdDev = sqrt(variance)
+                
+                let dataPoint = GraphDataPoint(
+                    date: startOfPeriod,
+                    value: mean,
+                    stdDev: stdDev,
+                    total: cumulativeSum,
+                    daysInPeriod: totalDaysInPeriod
+                )
+                graphData.append(dataPoint)
+            }
+            
+            healthStore.execute(query)
+        }
+        
+        group.notify(queue: .main) {
+            let sorted = graphData.sorted(by: { $0.date < $1.date })
+            completion(.success(sorted))
+        }
+    }   
+    
+    func fetchDailyStepsData(count: Int, completion: @escaping (Result<[CountDataPoint], Error>) -> Void) {
+        let steps = HKQuantityType(.stepCount)
+        var dailyData = [CountDataPoint]()
+        let group = DispatchGroup()
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        
+        for i in 0..<count {
+            group.enter()
+            guard let date = calendar.date(byAdding: .day, value: -i, to: today) else {
+                group.leave()
+                continue
+            }
+            
+            let startOfDay = calendar.startOfDay(for: date)
+            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+            let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay)
+            
+            let query = HKStatisticsQuery(
+                quantityType: steps,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, error in
+                defer { group.leave() }
+                
+                if let error = error {
+                    print("Error fetching steps for \(date): \(error.localizedDescription)")
+                    return
+                }
+                
+                let count = statistics?.sumQuantity()?.doubleValue(for: .count()) ?? 0
+                let dataPoint = CountDataPoint(date: startOfDay, count: Int(count))
+                dailyData.append(dataPoint)
+            }
+            healthStore.execute(query)
+        }
+        
+        group.notify(queue: .main) {
+            let sortedData = dailyData.sorted { $0.date < $1.date }
+            completion(.success(sortedData))
+        }
+    }
+}

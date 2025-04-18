@@ -7,13 +7,13 @@
 
 import SwiftUI
 import Charts
-
 struct ChartsView: View {
     @ObservedObject var viewModel = ChartsViewModel()
     @State var selectedOption: ChartOptions = .oneWeek
     @State var goal: Int = 10000
+    
     var body: some View {
-        VStack{
+        VStack {
             Text("Charts")
                 .font(.largeTitle)
                 .fontWeight(.bold)
@@ -22,42 +22,46 @@ struct ChartsView: View {
             
             ChartDataView(average: viewModel.averages[selectedOption] ?? 0,
                           total: viewModel.totals[selectedOption] ?? 0)
+            .padding(.bottom)
             
-            ZStack{
-                switch selectedOption {
-                    case .oneWeek:
-                    CountBarView(data: viewModel.mockDataDaily[.oneWeek] ?? [], timeUnit: .day, goal: goal)
-                    
-                case .oneMonth:
-                    CountBarView(data: viewModel.mockDataDaily[.oneMonth] ?? [], timeUnit: .day, goal: goal)
-                    
-                case .threeMonths:
-                    CountBarView(data: viewModel.mockDataDaily[.threeMonths] ?? [], timeUnit: .day, goal: goal)
-                    
-                case .oneYear:
-                    MeanStdGraphView(data: viewModel.mockDataMonthly[.oneYear] ?? [],
-                                     timeUnit: .month)
-                case .allTime:
-                    MeanStdGraphView(data: viewModel.mockDataMonthly[.allTime] ?? [],
-                                     timeUnit: .month)
+            TabView(selection: $selectedOption) {
+                ForEach(ChartOptions.allCases, id: \.self) { option in
+                    VStack {
+                        ZStack {
+                            switch option {
+                            case .oneWeek, .oneMonth:
+                                CountBarView(data: viewModel.dataDaily[option] ?? [],
+                                             timeUnit: option.timeUnit ?? .day,
+                                             goal: goal)
+                                .padding(.top)
+                            case .threeMonths, .oneYear, .allTime:
+                                MeanStdGraphView(data: viewModel.dataMonthly[option] ?? [],
+                                               timeUnit: option.timeUnit ?? .month)
+                                .padding(.top)
+                            }
+                        }
+                    }
+                    .tag(option)
                 }
             }
-            .frame(maxHeight: 350)
-            .padding(.horizontal)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(maxHeight: 300)
             
-            HStack{
-                ForEach(ChartOptions.allCases, id: \.self){ option in
-                    Button(option.rawValue){
-                        withAnimation{
+            // Option indicators
+            HStack {
+                ForEach(ChartOptions.allCases, id: \.self) { option in
+                    Button(option.rawValue) {
+                        withAnimation {
                             selectedOption = option
                         }
                     }
                     .padding()
                     .foregroundColor(.secondary)
-                    .background(selectedOption == option ? .green.opacity(0.6) :.clear)
+                    .background(selectedOption == option ? .green.opacity(0.6) : .clear)
                     .cornerRadius(10)
                 }
             }
+            .padding(.bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -66,3 +70,8 @@ struct ChartsView: View {
 #Preview {
     ChartsView()
 }
+
+#Preview {
+    ChartsView()
+}
+
