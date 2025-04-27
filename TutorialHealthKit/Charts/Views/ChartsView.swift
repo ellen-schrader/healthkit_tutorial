@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Charts
+
 struct ChartsView: View {
     @ObservedObject var viewModel = ChartsViewModel()
     @State var selectedOption: ChartOptions = .oneWeek
@@ -14,14 +15,13 @@ struct ChartsView: View {
     
     var body: some View {
         VStack {
-            Text("Charts")
+            Text("Steps")
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
             
-            ChartDataView(average: viewModel.averages[selectedOption] ?? 0,
-                          total: viewModel.totals[selectedOption] ?? 0)
+            ChartDataView(stats: viewModel.getAllStats(for: selectedOption))
             .padding(.bottom)
             
             TabView(selection: $selectedOption) {
@@ -64,6 +64,7 @@ struct ChartsView: View {
             .padding(.bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        
     }
 }
 

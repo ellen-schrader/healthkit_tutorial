@@ -7,6 +7,26 @@
 
 import Foundation
 
+enum StatKey: String, CaseIterable, Comparable {
+    case averageDaily = "Average"
+    case cumSum = "Total"
+    case maxDaily = "Max"
+    case minDaily = "Min"
+    
+    var displayOrder: Int {
+        switch self {
+        case .averageDaily: return 0
+        case .cumSum: return 1
+        case .maxDaily: return 2
+        case .minDaily: return 3
+        }
+    }
+    
+    static func < (lhs: StatKey, rhs: StatKey) -> Bool {
+        return lhs.displayOrder < rhs.displayOrder
+    }
+}
+
 enum ChartOptions: String, CaseIterable {
     case oneWeek = "W"
     case oneMonth = "M"
@@ -43,23 +63,40 @@ extension ChartOptions {
             return .year
         }
     }
-    
-//    func startDate(from endDate: Date = Date()) -> Date? {
-//        guard let unit = calendarComponent,
-//              let value = numberOfUnits else { return nil }
-//        return Calendar.current.date(byAdding: unit, value: -value, to: endDate)
-//    }
 }
 
+
 class ChartsViewModel: ObservableObject {
-    @Published var averages: [ChartOptions: Double]
-    @Published var totals: [ChartOptions: Double]
+    @Published var dataDaily: [ChartOptions: [CountDataPoint]] = [:]
+    @Published var dataMonthly: [ChartOptions: [GraphDataPoint]] = [:]
+    @Published var stats: [ChartOptions: [StatKey: Double]] = [:]
     
     let healthManager = HealthManager.shared
-    @Published var dataMonthly: [ChartOptions: [GraphDataPoint]]
-    @Published var dataDaily: [ChartOptions: [CountDataPoint]]
     
-    private func computeMonthlyStats(from dailyData: [CountDataPoint]) -> [GraphDataPoint] {
+    init() {
+        initializeStats()
+        fetchAllData()
+    }
+
+    func fetchAllData() {
+        for option in ChartOptions.allCases {
+            fetchStepsGraphChartData(chartOption: option)
+            fetchStepsCountData(chartOption: option)
+        }
+    }
+    
+    private func initializeStats() {
+        for option in ChartOptions.allCases {
+            stats[option] = [
+                .cumSum: 0,
+                .averageDaily: 0,
+                .maxDaily: 0,
+                .minDaily: 0,
+            ]
+        }
+    }
+    
+   private func computeMonthlyStats(from dailyData: [CountDataPoint]) -> [GraphDataPoint] {
             let calendar = Calendar.current
             let groupedByMonth = Dictionary(grouping: dailyData) { item in
                 calendar.startOfMonth(for: item.date)
@@ -71,25 +108,11 @@ class ChartsViewModel: ObservableObject {
                 let variance = counts.map { pow($0 - value, 2) }.reduce(0, +) / Double(counts.count)
                 let stdDev = sqrt(variance)
                 
-                return GraphDataPoint(date: date, value: value, stdDev: stdDev, total: 0.0, daysInPeriod: 0)
+                return GraphDataPoint(date: date, value: value, stdDev: stdDev, cumSum: 0.0, minDaily: 0.0, maxDaily: 0.0, daysInPeriod: 0)
             }.sorted { $0.date < $1.date }
         }
     
-    init(){
-        dataMonthly = Dictionary(uniqueKeysWithValues: ChartOptions.allCases.map { ($0, []) })
-        dataDaily = Dictionary(uniqueKeysWithValues: ChartOptions.allCases.map { ($0, []) })
-        averages = Dictionary(uniqueKeysWithValues: ChartOptions.allCases.map { ($0, 0.0) })
-        totals = Dictionary(uniqueKeysWithValues: ChartOptions.allCases.map { ($0, 0) })
-        
-        fetchStepsGraphChartData(chartOption: .oneYear)
-        fetchStepsGraphChartData(chartOption: .threeMonths)
-        fetchStepsGraphChartData(chartOption: .allTime)
-        
-        fetchStepsCountData(chartOption: .oneWeek)
-        fetchStepsCountData(chartOption: .oneMonth)
-        }
-    
-    func initMockData(){
+    private func initMockData(){
         let mockDataMaxDaily = (0..<1024).map { daysAgo in
             let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
             let randomSteps = Int.random(in: 3000...12000)
@@ -101,19 +124,7 @@ class ChartsViewModel: ObservableObject {
         dataDaily[.oneYear] = Array(mockDataMaxDaily.prefix(365))
         dataDaily[.allTime] = mockDataMaxDaily
         
-        
-        
-        totals[.oneWeek] = dataDaily[.oneWeek]!.map { Double($0.count) }.reduce(0, +)
-        totals[.oneMonth] = dataDaily[.oneMonth]!.map { Double($0.count) }.reduce(0, +)
-        totals[.threeMonths] = dataDaily[.threeMonths]!.map { Double($0.count) }.reduce(0, +)
-        totals[.oneYear] = dataDaily[.oneYear]!.map {Double($0.count) }.reduce(0, +)
-        totals[.allTime] = dataDaily[.allTime]!.map { Double($0.count) }.reduce(0, +)
-          
-        averages[.oneWeek] = Double(totals[.oneWeek]!) / Double(dataDaily[.oneWeek]!.count)
-        averages[.oneMonth] = Double(totals[.oneMonth]!) / Double(dataDaily[.oneMonth]!.count)
-        averages[.threeMonths] = Double(totals[.threeMonths]!) / Double(dataDaily[.threeMonths]!.count)
-        averages[.oneYear] = Double(totals[.oneYear]!) / Double(dataDaily[.oneYear]!.count)
-        averages[.allTime] = Double(totals[.allTime]!) / Double(dataDaily[.allTime]!.count)
+        self.initializeStats()
         dataMonthly[.threeMonths] = computeMonthlyStats(from: dataDaily[.threeMonths]!)
         dataMonthly[.oneYear] = computeMonthlyStats(from: dataDaily[.oneYear]!)
         dataMonthly[.allTime] = computeMonthlyStats(from: dataDaily[.allTime]!)
@@ -129,14 +140,14 @@ class ChartsViewModel: ObservableObject {
                 case .success(let data):
                     DispatchQueue.main.async {
                         self.dataMonthly[chartOption] = data
-                        self.updateTotalsAndAverages(for: chartOption)
+                        self.updateStats(for: chartOption)
                     }
                 case .failure(let failure):
                     print(failure.localizedDescription)
                 }
             }
             
-        default:
+        case .threeMonths, .oneYear:
             healthManager.fetchStepsGraphChartData(count: chartOption.numberOfUnits ?? 0, timeUnit: chartOption.timeUnit ?? .month) { [weak self] result in
                 guard let self = self else { return }
                 
@@ -144,33 +155,58 @@ class ChartsViewModel: ObservableObject {
                 case .success(let data):
                     DispatchQueue.main.async {
                         self.dataMonthly[chartOption] = data
-                        self.updateTotalsAndAverages(for: chartOption)
+                        self.updateStats(for: chartOption)
                     }
                 case .failure(let failure):
                     print(failure.localizedDescription)
                     DispatchQueue.main.async {
                         self.dataMonthly[chartOption] = []
-                        self.totals[chartOption] = 0
+                        self.resetStats(for: chartOption)
                     }
                 }
             }
+        default:
+            self.dataMonthly[chartOption] = []
+            self.resetStats(for: chartOption)
         }
     }
 
-    private func updateTotalsAndAverages(for chartOption: ChartOptions) {
-        guard let data = self.dataMonthly[chartOption], !data.isEmpty else {
-            self.totals[chartOption] = 0
-            self.averages[chartOption] = 0
+    private func updateStats(for chartOption: ChartOptions) {
+        guard let data = dataMonthly[chartOption], !data.isEmpty else {
+            resetStats(for: chartOption)
             return
         }
-        let totalSteps = data.reduce(0.0, { $0 + $1.total})
-        self.totals[chartOption] = totalSteps
+        let totalSteps = data.reduce(0.0, {$0 + $1.cumSum})
+        let totalDays = data.reduce(0, {$0 + $1.daysInPeriod})
+        let averageDailySteps = totalDays > 0 ? Double(totalSteps) / Double(totalDays) : 0
+        let dailyMeans = data.map{$0.value}
+        let minDailySteps = data.min(by: {$0.minDaily < $1.minDaily})?.minDaily ?? 0
+        let maxDailySteps = data.max(by: {$0.maxDaily < $1.maxDaily})?.maxDaily ?? 0
         
-        let totalDays = data.reduce(0, { $0 + $1.daysInPeriod })
-        let average = totalDays > 0 ? Double(totalSteps) / Double(totalDays) : 0
-        self.averages[chartOption] = average
-        
-        print("Updated for \(chartOption.rawValue): Total = \(totalSteps), Avg = \(Int(average))")
+        stats[chartOption] = [
+            .cumSum: Double(totalSteps),
+            .averageDaily: averageDailySteps,
+            .maxDaily: Double(maxDailySteps),
+            .minDaily: Double(minDailySteps),
+        ]
+        print("Updated stats for \(chartOption.rawValue): Total = \(totalSteps), Avg = \(Int(averageDailySteps))")
+    }
+
+    private func resetStats(for chartOption: ChartOptions) {
+        stats[chartOption] = [
+            .cumSum: 0,
+            .averageDaily: 0,
+            .maxDaily: 0,
+            .minDaily: 0
+        ]
+    }
+
+    func getStat(for option: ChartOptions, key: StatKey) -> Double {
+        return stats[option]?[key] ?? 0
+    }
+    
+    func getAllStats(for option: ChartOptions) -> [StatKey: Double] {
+        return stats[option] ?? [:]
     }
     
     func fetchStepsCountData(chartOption : ChartOptions){
@@ -181,8 +217,10 @@ class ChartsViewModel: ObservableObject {
                     case .success(let data):
                         DispatchQueue.main.async{
                             self.dataDaily[chartOption] = data
-                            self.totals[chartOption] = data.reduce(0, {$0 + Double($1.count)})
-                            self.averages[chartOption] = data.reduce(0.0, {$0 + Double($1.count)})/Double(data.count)
+                            self.stats[chartOption]?[.cumSum] = data.reduce(0, {$0 + Double($1.count)})
+                            self.stats[chartOption]?[.averageDaily] = data.reduce(0.0, {$0 + Double($1.count)})/Double(data.count)
+                            self.stats[chartOption]?[.maxDaily] = Double(data.max(by: {$0.count < $1.count})?.count ?? 0)
+                            self.stats[chartOption]?[.minDaily] = Double(data.min(by: {$0.count < $1.count})?.count ?? 0)
                         }
                     case .failure(let failure):
                         print(failure.localizedDescription)

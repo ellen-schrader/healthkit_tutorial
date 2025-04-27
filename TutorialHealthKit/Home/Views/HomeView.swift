@@ -9,14 +9,11 @@ import SwiftUI
 
 struct HomeView: View {
     @StateObject var viewModel: HomeViewModel = .init()
-
+    
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment : .leading) {
-                    Text("Welcome")
-                        .font(.largeTitle)
-                        .padding()
                     HStack{
                         
                         Spacer()
@@ -69,60 +66,48 @@ struct HomeView: View {
                     }
                     .padding()
                     
-                    HStack{
-                        Text("Fitness Activity")
+                    HStack {
+                        Text("Categories")
                             .font(.title2)
                         Spacer()
-                        Button{
-                            print("Show More")
-                        }label: {
-                            Text("Show More")
-                                .padding(.all, 10)
-                                .foregroundColor(.white)
-                                .background(Color.blue)
-                                .cornerRadius(20)
-                        }
                     }
                     .padding(.horizontal)
                     
-                    LazyVGrid(columns: Array(repeating: GridItem(spacing:10), count:2)){
-                        ForEach(viewModel.activities.sorted(by: { $0.id < $1.id })){ activity in
-                            ActivityCard(activity: activity)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    
-                    HStack{
-                        Text("Recent Workouts")
-                            .font(.title2)
-                        Spacer()
-                        NavigationLink{
-                            EmptyView()
-                        }label: {
-                            Text("Show More")
-                                .padding(.all, 10)
-                                .foregroundColor(.white)
-                                .background(Color.blue)
-                                .cornerRadius(20)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    
-                    LazyVGrid(columns: Array(repeating: GridItem(), count:1)){
-                        ForEach(viewModel.workouts){ workout in
-                            WorkoutCard(workout: workout)
+                    LazyVGrid(columns: Array(repeating: GridItem(spacing: 10), count: 2)) {
+                        ForEach(viewModel.mockActivities.sorted(by: { $0.id < $1.id })) { activity in
+                            NavigationLink(destination: getDestinationView(for: activity)) {
+                                ActivityCard(activity: activity,
+                                             clickable: true,
+                                             statistic: activity.statistics.keys.first ?? .duration)
+                            }
+                            .foregroundStyle(.primary)
+//                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                     .padding(.horizontal)
                 }
-                
+            }
+            .navigationTitle("Dashboard")
+        }
+    }
+        
+        @ViewBuilder
+        private func getDestinationView(for activity: Activity) -> some View {
+            switch activity.type {
+            case .exercise:
+                ExerciseHomeView()
+            case .metabolism:
+                Text("Metabolic View")
+            case .sleep:
+                Text("Sleep View")
+            case .mentalHealth:
+                Text("Mental View")
             }
         }
     }
-}
+
 
 #Preview {
     HomeView()
 }
+

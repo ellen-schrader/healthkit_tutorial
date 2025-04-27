@@ -19,30 +19,31 @@ class HomeViewModel: ObservableObject {
     
 
     @Published var mockActivities: [Activity] = [
-        Activity(id: 0,
-                 title: "Steps",
-                 subtitle: "Goal 10,000",
-                 imageName: "figure.walk",
-                 tintColor: .green,
-                 amount: "1,234"),
-        Activity(id: 1,
-                 title: "Calories",
-                 subtitle: "Goal 800 kcal",
+        Activity(id: "0",
+                 type: .exercise,
+                 title: "Exercise",
+                 imageName: "dumbbell.fill",
+                 tintColor: .red,
+                 statistics: [.duration : 170]),
+        Activity(id: "1",
+                 type: .metabolism,
+                 title: "Metabolism",
                  imageName: "flame.fill",
                  tintColor: .orange,
-                 amount: "600"),
-        Activity(id: 2,
-                 title: "Run",
-                 subtitle: "Goal 30min",
-                 imageName: "figure.run",
-                 tintColor: .red,
-                 amount: "10min"),
-        Activity(id: 3,
+                 statistics: [.calories: 600]),
+        Activity(id: "2",
+                 type: .sleep,
                  title: "Sleep",
-                 subtitle: "Goal 8 hours",
-                 imageName: "bed.double.fill",
+                 imageName: "moon.fill",
                  tintColor: .blue,
-                 amount: "7.5h")
+                 statistics: [.duration: 460]
+                 ),
+        Activity(id: "3",
+                 type: .mentalHealth,
+                 title: "Mental",
+                 imageName: "brain.head.profile",
+                 tintColor: .purple,
+                 statistics: [.mood: 5])
     ]
     
     @Published var mockWorkouts: [Workout] = [
@@ -54,30 +55,29 @@ class HomeViewModel: ObservableObject {
     
     
     init() {
-        Task {
-            do{
-                try await healthManager.requestAuthorization()
-                fetchTodayCaloriesBurned()
-                fetchTodayExerciseTime()
-                fetchTodayStandHours()
-                fetchTodaySteps()
-                fetchWorkoutStats()
-                fetchRecentWorkouts(month: Date(), numberOfWorkouts: 10)
-                
-            }
-            catch {
-                print(error.localizedDescription)
-            }
-        }
+//        Task {
+//            do{
+//                try await healthManager.requestAuthorization()
+//                fetchTodayCaloriesBurned()
+//                fetchTodayExerciseTime()
+//                fetchTodayStandHours()
+//                fetchTodaySteps()
+//                fetchWorkoutStats()
+//                fetchRecentWorkouts(month: Date(), numberOfWorkouts: 10)
+//                
+//            }
+//            catch {
+//                print(error.localizedDescription)
+//            }
+//        }
     }
     
     func fetchTodayCaloriesBurned() {
         healthManager.fetchTodayCaloriesBurned { result in
             switch result {
-            case .success(let activity):
+            case .success(let calories):
                 DispatchQueue.main.async {
-                    self.calories = Int(activity.amount.toDoubleFromFormattedNumber() ?? 0)
-                    self.activities.append(activity)
+                    self.calories = Int(calories)
                 }
             case .failure(let error):
                 print("Error fetching calories: \(error)")
@@ -133,7 +133,7 @@ class HomeViewModel: ObservableObject {
     }
     
     func fetchWorkoutStats(){
-        healthManager.fetchCurrentWeeksWorkoutStats{
+        healthManager.fetchWeekWorkoutStats(selectedWorkouts: nil, statistics: [.duration, .calories]){
             result in
             switch result {
             case .success(let stats):

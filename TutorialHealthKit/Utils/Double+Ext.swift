@@ -44,7 +44,6 @@ extension Double {
             }
         }
         
-        // Original formatting for smaller numbers
         formatter.maximumFractionDigits = 0
         formatter.locale = Locale(identifier: "en_US")
         return formatter.string(from: NSNumber(value: self)) ?? "0"

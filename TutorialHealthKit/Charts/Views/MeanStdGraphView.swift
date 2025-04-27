@@ -48,7 +48,9 @@ struct MeanStdGraphView: View {
             date: Calendar.current.date(byAdding: .month, value: $0, to: Date())!,
             value: Double.random(in: 5000...8000),
             stdDev: Double.random(in: 300...800),
-            total: Double.random(in: 5000...8000),
+            cumSum: Double.random(in: 5000...8000),
+            minDaily: Double.random(in: 500...1000),
+            maxDaily: Double.random(in: 700...1200),
             daysInPeriod: Int.random(in: 20...30)
         )
     }

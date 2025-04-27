@@ -16,3 +16,4 @@ struct Workout: Identifiable, Hashable {
     let calories: String
     let tintColor: Color
 }
+

@@ -9,6 +9,10 @@ import Foundation
 import HealthKit
 import SwiftUI
 
+func getSortedUUID() -> String {
+    return "\(Int(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString)"
+}
+
 class HealthManager {
     static let shared = HealthManager()
     
@@ -36,7 +40,7 @@ class HealthManager {
         try await healthStore.requestAuthorization(toShare: [], read: healthTypes)
     }
     
-    func fetchTodayCaloriesBurned(completion: @escaping(Result<Activity, Error>) -> Void){
+    func fetchTodayCaloriesBurned(completion: @escaping(Result<Double, Error>) -> Void){
         let calories = HKQuantityType(.activeEnergyBurned)
         let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
         let query = HKStatisticsQuery(quantityType: calories, quantitySamplePredicate: predicate) { _, results, error in
@@ -45,15 +49,8 @@ class HealthManager {
                 return
             }
             
-            let calorieCount = quantity.doubleValue(for: .kilocalorie())
-            
-            let activity = Activity(id: 1,
-                                    title: "Calories",
-                                    subtitle: "Goal 600 kcal",
-                                    imageName: "flame.fill",
-                                    tintColor: .orange,
-                                    amount: calorieCount.formattedNumberString())
-            completion(.success(activity))
+            let calories = quantity.doubleValue(for: .kilocalorie())
+            completion(.success(calories))
         }
         healthStore.execute(query)
     }
@@ -74,6 +71,152 @@ class HealthManager {
         
         healthStore.execute(query)
     }
+    
+    func fetchWeekTotalStats(statistics: Set<ActivityStatistic>, completion: @escaping (Result<[ActivityStatistic: Double], Error>) -> Void) {
+        Task {
+            do {
+                let result = try await fetchWeekTotalStatsAsync(statistics: statistics)
+                completion(.success(result))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    func fetchWeekTotalStatsAsync(statistics: Set<ActivityStatistic>) async throws -> [ActivityStatistic: Double] {
+        let calendar = Calendar.current
+        let startOfWeek = calendar.dateComponents([.calendar, .yearForWeekOfYear, .weekOfYear], from: Date())
+        let startDate = calendar.date(from: startOfWeek) ?? Date().addingTimeInterval(-7*24*60*60)
+        
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date())
+        var totals: [ActivityStatistic: Double] = [:]
+        
+        for stat in statistics {
+            let quantityType: HKQuantityType
+            let unit: HKUnit
+            
+            switch stat {
+            case .calories:
+                quantityType = HKQuantityType(.activeEnergyBurned)
+                unit = .kilocalorie()
+                
+            case .duration:
+                quantityType = HKQuantityType(.appleExerciseTime)
+                unit = .minute()
+                
+            case .steps:
+                quantityType = HKQuantityType(.stepCount)
+                unit = .count()
+                
+            default:
+                continue
+            }
+            let value = try await queryStatistic(type: quantityType, unit: unit, predicate: predicate)
+            totals[stat] = value
+        }
+        
+        return totals
+    }
+
+    private func queryStatistic(type: HKQuantityType, unit: HKUnit, predicate: NSPredicate) async throws -> Double {
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, results, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                if let quantity = results?.sumQuantity() {
+                    let value = quantity.doubleValue(for: unit)
+                    continuation.resume(returning: value)
+                } else {
+                    continuation.resume(returning: 0.0)
+                }
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+
+    func fetchWeekWorkoutStatsAsync(selectedWorkouts: [HKWorkoutActivityType]?, statistics: Set<ActivityStatistic>) async throws -> [Activity] {
+        let calendar = Calendar.current
+        let startOfWeek = calendar.dateComponents([.calendar, .yearForWeekOfYear, .weekOfYear], from: Date())
+        let startDate = calendar.date(from: startOfWeek) ?? Date().addingTimeInterval(-7*24*60*60)
+        
+        let workouts = try await fetchWorkouts(from: startDate, to: Date())
+        let filteredWorkouts = filterOverlappingWorkouts(workouts)
+        
+        var stats: [HKWorkoutActivityType: [ActivityStatistic: Double]] = [:]
+        
+        for workout in filteredWorkouts {
+            let type = workout.workoutActivityType
+            guard selectedWorkouts?.contains(type) ?? true else { continue }
+            
+            for statistic in statistics {
+                let value = extractStatistic(from: workout, for: statistic)
+                stats[type, default: [:]][statistic, default: 0.0] += value
+            }
+        }
+        
+        let activities = stats.enumerated().map { index, entry in
+            let (type, statistics) = entry
+            return Activity(
+                id: "\(index)",
+                type: .exercise,
+                title: type.displayName,
+                imageName: type.imageName,
+                tintColor: type.color,
+                statistics: statistics
+            )
+        }
+        
+        return activities
+    }
+    
+    func fetchWeekWorkoutStats(selectedWorkouts: [HKWorkoutActivityType]?, statistics: Set<ActivityStatistic>, completion: @escaping (Result<[Activity], Error>) -> Void) {
+        Task {
+            do {
+                let result = try await fetchWeekWorkoutStatsAsync(selectedWorkouts: selectedWorkouts, statistics: statistics)
+                completion(.success(result))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    private func fetchWorkouts(from startDate: Date, to endDate: Date) async throws -> [HKWorkout] {
+        return try await withCheckedThrowingContinuation { continuation in
+            let workouts = HKSampleType.workoutType()
+            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+            
+            let query = HKSampleQuery(
+                sampleType: workouts,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, results, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let workouts = results as? [HKWorkout] else {
+                    continuation.resume(throwing: NSError(domain: "HealthKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not convert samples to workouts"]))
+                    return
+                }
+                
+                continuation.resume(returning: workouts)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+    
     
     // Added this to compute time from workouts in case exercise minutes is nil. For users who manually add workouts and do not have an apple watch.
     private func computeExerciseTimeFromWorkouts(completion: @escaping(Result<Double, Error>) -> Void) {
@@ -118,58 +261,106 @@ class HealthManager {
             }
             
             let steps = quantity.doubleValue(for: .count())
-            let activity = Activity(id: 0,
+            let activity = Activity(id: getSortedUUID(),
+                                    type: .exercise,
                                     title: "Steps",
-                                    subtitle: "Goal 10,000",
                                     imageName: "figure.walk",
                                     tintColor: .green,
-                                    amount: steps.formattedNumberString())
+                                    statistics: [.steps : steps])
             completion(.success(activity))
         }
         healthStore.execute(query)
     }
     
-    func fetchCurrentWeeksWorkoutStats(completion: @escaping (Result<[Activity], Error>) -> Void) {
-        let workouts = HKSampleType.workoutType()
-        let predicate = HKQuery.predicateForSamples(withStart: .startOfWeek, end: Date())
+    func fetchCurrentWeeksWorkoutStats(
+        selectedWorkouts: [HKWorkoutActivityType]?,
+        statistics: Set<ActivityStatistic>,
+        completion: @escaping (Result<[Activity], Error>) -> Void){
+            
+        let workoutType = HKSampleType.workoutType()
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfWeekComponents = calendar.dateComponents([.calendar, .yearForWeekOfYear, .weekOfYear], from: now)
+        let startDate = calendar.date(from: startOfWeekComponents) ?? now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: now)
         
-        let query = HKSampleQuery(sampleType: workouts, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, results, error in
-            guard let workouts = results as? [HKWorkout], error == nil else {
-                completion(.failure(error ?? NSError()))
+        let query = HKSampleQuery(sampleType: workoutType,
+                                  predicate: predicate,
+                                  limit: HKObjectQueryNoLimit,
+                                  sortDescriptors: nil) {[weak self] _, results, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                completion(.failure(error))
                 return
             }
             
-            var stats: [HKWorkoutActivityType: Int] = [:]
-            let includedTypes: [HKWorkoutActivityType] = [.running, .traditionalStrengthTraining, .walking, .cooldown, .yoga]
+            guard let workouts = results as? [HKWorkout] else {
+                completion(.failure(NSError()))
+                return
+            }
+            
+            var stats: [HKWorkoutActivityType: [ActivityStatistic: Double]] = [:]
             
             let filteredWorkouts = self.filterOverlappingWorkouts(workouts)
             
             for workout in filteredWorkouts {
                 let type = workout.workoutActivityType
-                guard includedTypes.contains(type) else { continue }
+                guard selectedWorkouts?.contains(type) ?? true else { continue }
                 
-                let duration = Int(workout.duration) / 60
-                stats[type, default: 0] += duration
-            }
-            let activities: [Activity] = stats.enumerated().map { index, pair in
-                let (type, minutes) = pair
-                return Activity(
-                    id: index + 2, // after steps and calories
-                    title: type.displayName,
-                    subtitle: "This week",
-                    imageName: type.imageName,
-                    tintColor: type.color,
-                    amount: "\(minutes) min"
-                )
+                for statistic in statistics {
+                    let value = self.extractStatistic(from: workout, for: statistic)
+                    stats[type, default: [:]][statistic, default: 0.0] += value
+                }
             }
             
+            let activities = stats.enumerated().map { index, entry in
+                let (type, statistics) = entry
+                return Activity(
+                    id: "\(index)",
+                    type: .exercise,
+                    title: type.displayName,
+                    imageName: type.imageName,
+                    tintColor: type.color,
+                    statistics: statistics
+                )
+            }
             completion(.success(activities))
         }
-        
         healthStore.execute(query)
     }
+
+    private func extractStatistic(from workout: HKWorkout, for statistic: ActivityStatistic) -> Double {
+        switch statistic {
+        case .calories:
+            let energyType = HKQuantityType(.activeEnergyBurned)
+            return workout.statistics(for: energyType)?
+                .sumQuantity()?
+                .doubleValue(for: .kilocalorie()) ?? 0.0
+        case .duration:
+            return workout.duration / 60.0
+        default:
+            return 0.0
+        }
+    }
+
+    func filterOverlappingWorkouts(_ workouts: [HKWorkout]) -> [HKWorkout] {
+        let watchWorkouts = workouts.filter { workout in
+                workout.device?.model?.lowercased().contains("watch") ?? false
+            }
+       
+        let otherWorkouts = workouts.filter { workout in
+            !(workout.device?.model?.lowercased().contains("watch") ?? false)
+        }
+        
+        var filteredWorkouts: [HKWorkout] = otherWorkouts.filter { workout in
+            !watchWorkouts.contains { $0.startDate <= workout.endDate || workout.startDate  <= $0.endDate }
+        }
+        
+        filteredWorkouts.append(contentsOf: watchWorkouts)
+        return filteredWorkouts.sorted { $0.startDate > $1.startDate }
+    }
     
-    //  MARK: Recent Workouts
     func fetchWorkoutsForMonth(month: Date, completion: @escaping (Result<[Workout], Error>) -> Void) {
         let workouts = HKSampleType.workoutType()
         let (startDate, endDate) = month.fetchMonthStartAndEndDate()
@@ -208,25 +399,8 @@ class HealthManager {
         healthStore.execute(query)
         
     }
-    
-    func filterOverlappingWorkouts(_ workouts: [HKWorkout]) -> [HKWorkout] {
-        let watchWorkouts = workouts.filter { workout in
-                workout.device?.model?.lowercased().contains("watch") ?? false
-            }
-       
-        let otherWorkouts = workouts.filter { workout in
-            !(workout.device?.model?.lowercased().contains("watch") ?? false)
-        }
-        
-        var filteredWorkouts: [HKWorkout] = otherWorkouts.filter { workout in
-            !watchWorkouts.contains { $0.startDate <= workout.endDate || workout.startDate  <= $0.endDate }
-        }
-        
-        filteredWorkouts.append(contentsOf: watchWorkouts)
-        return filteredWorkouts.sorted { $0.startDate > $1.startDate }
-    }
-    
 }
+
 extension HealthManager {
     func fetchEarliestStepDate(completion: @escaping (Date?) -> Void) {
         let steps = HKQuantityType(.stepCount)
@@ -325,16 +499,19 @@ extension HealthManager {
                 let cumulativeSum = dailyTotals.reduce(0, +)
                 
                 let totalDaysInPeriod = calendar.dateComponents([.day], from: startOfPeriod, to: actualEndDate).day! + 1
-                let dailyMean = cumulativeSum / Double(totalDaysInPeriod)
                 let mean = dailyTotals.reduce(0, +) / Double(dailyTotals.count)
                 let variance = dailyTotals.reduce(0) { $0 + pow($1 - mean, 2) } / Double(dailyTotals.count)
                 let stdDev = sqrt(variance)
+                let maxValue = dailyTotals.max() ?? 0
+                let minValue = dailyTotals.min() ?? 0
                 
                 let dataPoint = GraphDataPoint(
                     date: startOfPeriod,
                     value: mean,
                     stdDev: stdDev,
-                    total: cumulativeSum,
+                    cumSum: cumulativeSum,
+                    minDaily: minValue,
+                    maxDaily: maxValue,
                     daysInPeriod: totalDaysInPeriod
                 )
                 graphData.append(dataPoint)

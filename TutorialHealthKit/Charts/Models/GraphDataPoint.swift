@@ -12,6 +12,8 @@ struct GraphDataPoint: Identifiable {
     let date: Date
     let value: Double
     let stdDev: Double
-    let total: Double
+    let cumSum: Double
+    let minDaily: Double
+    let maxDaily: Double
     let daysInPeriod: Int
 }
