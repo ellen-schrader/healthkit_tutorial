@@ -8,15 +8,21 @@
 import SwiftUI
 
 enum ActivityStatistic: String, CaseIterable{
-    case duration
+    case minutes
+    case hours
     case calories
     case steps
     case mood
+    case duration
     
     func getMetric() -> String {
         switch self {
+        case .minutes:
+            return "min"
         case .duration:
             return "min"
+        case .hours:
+            return "h"
         case .calories:
             return "kcal"
         case .steps:
@@ -41,10 +47,24 @@ struct Activity  : Identifiable, Hashable{
     let title: String
     let imageName: String
     let tintColor: Color
-    let statistics: [ActivityStatistic : Double]
+    var statistics: [ActivityStatistic : Double]
     
     func toString(statistic: ActivityStatistic) -> String{
         return "\(statistics[statistic]?.formattedNumberString() ?? "-") \(statistic.getMetric())"
+    }
+
+    func updatingStatistic(_ statistic: ActivityStatistic, value: Double) -> Activity {
+        var updatedStats = statistics
+        updatedStats[statistic] = value
+        
+        return Activity(
+            id: id,
+            type: type,
+            title: title,
+            imageName: imageName,
+            tintColor: tintColor,
+            statistics: updatedStats
+        )
     }
     
 }

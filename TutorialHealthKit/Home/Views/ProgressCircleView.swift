@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ProgressCircleView: View {
-    @Binding var progress: Int
+    var progress: Int
     var color: Color
     var goal: Int
     private let width: CGFloat = 20.0
@@ -55,5 +55,5 @@ struct ProgressCircleView: View {
 }
 
 #Preview {
-    ProgressCircleView(progress: .constant(120), color: .green, goal: 100)
+    ProgressCircleView(progress: 120, color: .green, goal: 100)
 }

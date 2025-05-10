@@ -59,36 +59,26 @@ class ExerciseViewModel: ObservableObject {
         .init(id: 3, name: "Missing", size: 0.2, color:  .gray.opacity(0.2))
     ]
     
-    
     init() {
-        fetchAllStats()
-    }
-
-    func refresh(){
-        fetchAllStats()
-    }
-
-    func fetchAllStats() {
-        isLoading = true
-        activities = []
-
-        self.fetchTodaySteps {
-            self.fetchWeekTotalStats{
-                self.fetchWorkoutStats(statistics: [.duration, .calories]) {
-                    self.fetchRecentWorkouts(month: Date(), numberOfWorkouts: 5)
-                    self.isLoading = false
-                }
+        Task {
+            do{
+                try await healthManager.requestAuthorization()
+                fetchWeekTotalStats()
+                fetchWorkoutStats(statistics: [.duration, .calories])
+                fetchRecentWorkouts(month: Date(), numberOfWorkouts: 5)
+            }
+            catch {
+                print(error.localizedDescription)
             }
         }
+        
     }
     
     func fetchTodayCaloriesBurned() {
-        healthManager.fetchTodayCaloriesBurned { result in
+        healthManager.fetchHKStatistic(statistic: .caloriesBurned, startDate: .startOfDay, endDate: Date()) { result in
             switch result {
             case .success(let calories):
-                DispatchQueue.main.async {
-                    self.calories = Int(calories)
-                }
+                self.calories = Int(calories)
             case .failure(let error):
                 print("Error fetching calories: \(error)")
             }
@@ -97,59 +87,30 @@ class ExerciseViewModel: ObservableObject {
     
     //MARK: Fitness Activity
     
-  func fetchTodaySteps(completion: @escaping () -> Void = {}) {
-    healthManager.fetchTodaySteps { [weak self] result in
-        guard let self = self else { 
-            completion()
-            return 
+    func fetchWeekTotalStats(){
+        healthManager.fetchHKStatistic(statistic: .caloriesBurned, startDate: .startOfWeek, endDate: Date()) { result in
+            switch result {
+            case .success(let calories):
+                self.totals[.calories] = calories
+            case .failure(let error):
+                print("Error fetching weeks exercise timr: \(error)")
+            }
         }
         
-        switch result {
-        case .success(let activity):
-            DispatchQueue.main.async {
-                self.steps = Int(activity.statistics[.steps] ?? 0.0)
-                completion()
-            }
-        case .failure(let error):
-            print("Error fetching steps: \(error)")
-            DispatchQueue.main.async {
-            completion() 
-            }
-        }
-        }
-    }
-    
-    func fetchWeekTotalStats(completion: @escaping() -> Void){
-        let statistics: Set<ActivityStatistic> = [.duration, .calories]
-        healthManager.fetchWeekTotalStats(statistics: statistics) {[weak self] result in
-                guard let self = self else {
-                    completion()
-                    return
-                }
-            
+        healthManager.fetchHKStatistic(statistic: .exerciseTime, startDate: .startOfWeek, endDate: Date()) { result in
             switch result {
-            case .success(let stats):
-                DispatchQueue.main.async {
-                    self.totals = stats
-                    completion()
-                }
+            case .success(let duration):
+                self.totals[.duration] = duration
             case .failure(let error):
-                print("Error fetching total stats: \(error)")
-                DispatchQueue.main.async {
-                    completion()
-                }
+                print("Error fetching weeks exercise time: \(error)")
             }
         }
     }
     
-    func fetchWorkoutStats(statistics: Set<ActivityStatistic> = [.duration, .calories], 
-                      completion: @escaping () -> Void = {}) {
+    func fetchWorkoutStats(statistics: Set<ActivityStatistic> = [.duration, .calories]) {
         healthManager.fetchWeekWorkoutStats(selectedWorkouts: self.selectedActivities,
                                                 statistics: statistics) { [weak self] result in
-            guard let self = self else { 
-                completion()
-                return 
-            }
+            guard let self = self else { return }
             
             switch result {
             case .success(let stats):
@@ -158,14 +119,9 @@ class ExerciseViewModel: ObservableObject {
                     for statistic in statistics {
                         self.getProportionWorkouts(statistic: statistic)
                     }
-                    
-                    completion()
                 }
             case .failure(let error):
                 print("Error fetching workout stats: \(error)")
-                DispatchQueue.main.async {
-                    completion()
-                }
             }
         }
     }

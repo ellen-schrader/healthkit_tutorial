@@ -9,6 +9,12 @@ import Foundation
 import HealthKit
 import SwiftUI
 
+enum HealthKitFetchError: Error {
+    case invalidType
+    case queryFailed(Error)
+    case noData
+}
+
 func getSortedUUID() -> String {
     return "\(Int(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString)"
 }
@@ -40,109 +46,65 @@ class HealthManager {
         try await healthStore.requestAuthorization(toShare: [], read: healthTypes)
     }
     
-    func fetchTodayCaloriesBurned(completion: @escaping(Result<Double, Error>) -> Void){
-        let calories = HKQuantityType(.activeEnergyBurned)
-        let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
-        let query = HKStatisticsQuery(quantityType: calories, quantitySamplePredicate: predicate) { _, results, error in
-            guard let quantity = results?.sumQuantity() , error == nil else {
-                completion(.failure(NSError()))
+    func fetchHKStatistic(statistic: HKStatistic, startDate: Date, endDate: Date, completion: @escaping (Result<Double, Error>) -> Void) {
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
+        
+        guard let queryType = statistic.queryType() else {
+            DispatchQueue.main.async {
+                completion(.failure(HealthKitFetchError.invalidType))
+            }
+            return
+        }
+        
+        if let quantityType = queryType as? HKQuantityType, let options = statistic.options() {
+            executeStatisticsQuery(quantityType: quantityType, predicate: predicate, options: options, statistic: statistic, completion: completion)
+        } else if let sampleType = queryType as? HKSampleType {
+            executeSampleQuery(sampleType: sampleType, predicate: predicate, statistic: statistic, completion: completion)
+        } else {
+            DispatchQueue.main.async {
+                completion(.failure(HealthKitFetchError.invalidType))
+            }
+        }
+    }
+    
+    private func executeStatisticsQuery(quantityType: HKQuantityType, predicate: NSPredicate, options: HKStatisticsOptions, statistic: HKStatistic, completion: @escaping (Result<Double, Error>) -> Void) {
+        let query = HKStatisticsQuery(quantityType: quantityType, quantitySamplePredicate: predicate, options: options) { _, statistics, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    completion(.failure(HealthKitFetchError.queryFailed(error)))
+                }
                 return
             }
+            let value = statistic.processStatistics(statistics)
             
-            let calories = quantity.doubleValue(for: .kilocalorie())
-            completion(.success(calories))
-        }
-        healthStore.execute(query)
-    }
-    
-    func fetchTodayExerciseTime(completion: @escaping(Result<Double, Error>) -> Void) {
-        let exercise = HKQuantityType(.appleExerciseTime)
-        let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
-        
-        let query = HKStatisticsQuery(quantityType: exercise, quantitySamplePredicate: predicate) { _, results, error in
-            if let quantity = results?.sumQuantity() {
-                let exerciseTime = quantity.doubleValue(for: .minute())
-                completion(.success(exerciseTime))
-            } else {
-                // Fallback to summing workout durations
-                self.computeExerciseTimeFromWorkouts(completion: completion)
+            DispatchQueue.main.async {
+                completion(.success(value))
             }
         }
         
         healthStore.execute(query)
     }
-    
-    func fetchWeekTotalStats(statistics: Set<ActivityStatistic>, completion: @escaping (Result<[ActivityStatistic: Double], Error>) -> Void) {
-        Task {
-            do {
-                let result = try await fetchWeekTotalStatsAsync(statistics: statistics)
-                completion(.success(result))
-            } catch {
-                completion(.failure(error))
-            }
-        }
-    }
-    
-    func fetchWeekTotalStatsAsync(statistics: Set<ActivityStatistic>) async throws -> [ActivityStatistic: Double] {
-        let calendar = Calendar.current
-        let startOfWeek = calendar.dateComponents([.calendar, .yearForWeekOfYear, .weekOfYear], from: Date())
-        let startDate = calendar.date(from: startOfWeek) ?? Date().addingTimeInterval(-7*24*60*60)
-        
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date())
-        var totals: [ActivityStatistic: Double] = [:]
-        
-        for stat in statistics {
-            let quantityType: HKQuantityType
-            let unit: HKUnit
-            
-            switch stat {
-            case .calories:
-                quantityType = HKQuantityType(.activeEnergyBurned)
-                unit = .kilocalorie()
-                
-            case .duration:
-                quantityType = HKQuantityType(.appleExerciseTime)
-                unit = .minute()
-                
-            case .steps:
-                quantityType = HKQuantityType(.stepCount)
-                unit = .count()
-                
-            default:
-                continue
-            }
-            let value = try await queryStatistic(type: quantityType, unit: unit, predicate: predicate)
-            totals[stat] = value
-        }
-        
-        return totals
-    }
 
-    private func queryStatistic(type: HKQuantityType, unit: HKUnit, predicate: NSPredicate) async throws -> Double {
-        return try await withCheckedThrowingContinuation { continuation in
-            let query = HKStatisticsQuery(
-                quantityType: type,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum
-            ) { _, results, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
+    private func executeSampleQuery(sampleType: HKSampleType, predicate: NSPredicate, statistic: HKStatistic, completion: @escaping (Result<Double, Error>) -> Void) {
+        let query = HKSampleQuery(sampleType: sampleType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    completion(.failure(HealthKitFetchError.queryFailed(error)))
                 }
-                
-                if let quantity = results?.sumQuantity() {
-                    let value = quantity.doubleValue(for: unit)
-                    continuation.resume(returning: value)
-                } else {
-                    continuation.resume(returning: 0.0)
-                }
+                return
             }
+            let samples = samples ?? []
+            let value = statistic.process(samples: samples)
             
-            healthStore.execute(query)
+            DispatchQueue.main.async {
+                completion(.success(value))
+            }
         }
+        healthStore.execute(query)
     }
+    
 
-    func fetchWeekWorkoutStatsAsync(selectedWorkouts: [HKWorkoutActivityType]?, statistics: Set<ActivityStatistic>) async throws -> [Activity] {
+    private func fetchWeekWorkoutStatsAsync(selectedWorkouts: [HKWorkoutActivityType]?, statistics: Set<ActivityStatistic>) async throws -> [Activity] {
         let calendar = Calendar.current
         let startOfWeek = calendar.dateComponents([.calendar, .yearForWeekOfYear, .weekOfYear], from: Date())
         let startDate = calendar.date(from: startOfWeek) ?? Date().addingTimeInterval(-7*24*60*60)
@@ -177,6 +139,7 @@ class HealthManager {
         return activities
     }
     
+    // ExerciseViewModel
     func fetchWeekWorkoutStats(selectedWorkouts: [HKWorkoutActivityType]?, statistics: Set<ActivityStatistic>, completion: @escaping (Result<[Activity], Error>) -> Void) {
         Task {
             do {
@@ -216,119 +179,7 @@ class HealthManager {
             healthStore.execute(query)
         }
     }
-    
-    
-    // Added this to compute time from workouts in case exercise minutes is nil. For users who manually add workouts and do not have an apple watch.
-    private func computeExerciseTimeFromWorkouts(completion: @escaping(Result<Double, Error>) -> Void) {
-        let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
-        
-        let query = HKSampleQuery(sampleType: .workoutType(), predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
-            guard let workouts = samples as? [HKWorkout], error == nil else {
-                completion(.failure(error ?? NSError(domain: "HealthKit", code: 1)))
-                return
-            }
-            let totalMinutes = workouts.reduce(0.0) { $0 + $1.duration / 60.0 }
-            completion(.success(totalMinutes))
-        }
-        
-        healthStore.execute(query)
-    }
-    
-    func fetchTodayStandHours(completion: @escaping(Result<Int, Error>) -> Void){
-        let stand = HKCategoryType(.appleStandHour)
-        let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
-        let query = HKSampleQuery(sampleType: stand, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil){
-            _, results, error in
-            guard let samples = results as? [HKCategorySample] , error == nil else {
-                completion(.failure(NSError()))
-                return
-            }
-            let standCount = samples.filter({$0.value == 0}).count // 0 for hours in which the user actually stood (counter intuitive)
-            completion(.success(standCount))
-        }
-        healthStore.execute(query)
-    }
-    
-    //MARK: Fitness Activity
-    
-    func fetchTodaySteps(completion: @escaping(Result<Activity, Error>) -> Void){
-        let steps = HKQuantityType(.stepCount)
-        let predicate = HKQuery.predicateForSamples(withStart: .startOfDay, end: Date())
-        let query = HKStatisticsQuery(quantityType: steps, quantitySamplePredicate: predicate) { _, results, error in
-            guard let quantity = results?.sumQuantity() , error == nil else {
-                completion(.failure(NSError()))
-                return
-            }
-            
-            let steps = quantity.doubleValue(for: .count())
-            let activity = Activity(id: getSortedUUID(),
-                                    type: .exercise,
-                                    title: "Steps",
-                                    imageName: "figure.walk",
-                                    tintColor: .green,
-                                    statistics: [.steps : steps])
-            completion(.success(activity))
-        }
-        healthStore.execute(query)
-    }
-    
-    func fetchCurrentWeeksWorkoutStats(
-        selectedWorkouts: [HKWorkoutActivityType]?,
-        statistics: Set<ActivityStatistic>,
-        completion: @escaping (Result<[Activity], Error>) -> Void){
-            
-        let workoutType = HKSampleType.workoutType()
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfWeekComponents = calendar.dateComponents([.calendar, .yearForWeekOfYear, .weekOfYear], from: now)
-        let startDate = calendar.date(from: startOfWeekComponents) ?? now.addingTimeInterval(-7 * 24 * 60 * 60)
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: now)
-        
-        let query = HKSampleQuery(sampleType: workoutType,
-                                  predicate: predicate,
-                                  limit: HKObjectQueryNoLimit,
-                                  sortDescriptors: nil) {[weak self] _, results, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-            
-            guard let workouts = results as? [HKWorkout] else {
-                completion(.failure(NSError()))
-                return
-            }
-            
-            var stats: [HKWorkoutActivityType: [ActivityStatistic: Double]] = [:]
-            
-            let filteredWorkouts = self.filterOverlappingWorkouts(workouts)
-            
-            for workout in filteredWorkouts {
-                let type = workout.workoutActivityType
-                guard selectedWorkouts?.contains(type) ?? true else { continue }
-                
-                for statistic in statistics {
-                    let value = self.extractStatistic(from: workout, for: statistic)
-                    stats[type, default: [:]][statistic, default: 0.0] += value
-                }
-            }
-            
-            let activities = stats.enumerated().map { index, entry in
-                let (type, statistics) = entry
-                return Activity(
-                    id: "\(index)",
-                    type: .exercise,
-                    title: type.displayName,
-                    imageName: type.imageName,
-                    tintColor: type.color,
-                    statistics: statistics
-                )
-            }
-            completion(.success(activities))
-        }
-        healthStore.execute(query)
-    }
+
 
     private func extractStatistic(from workout: HKWorkout, for statistic: ActivityStatistic) -> Double {
         switch statistic {
@@ -344,7 +195,7 @@ class HealthManager {
         }
     }
 
-    func filterOverlappingWorkouts(_ workouts: [HKWorkout]) -> [HKWorkout] {
+    private func filterOverlappingWorkouts(_ workouts: [HKWorkout]) -> [HKWorkout] {
         let watchWorkouts = workouts.filter { workout in
                 workout.device?.model?.lowercased().contains("watch") ?? false
             }
@@ -401,6 +252,9 @@ class HealthManager {
     }
 }
 
+
+
+// MARK: ChartDataView
 extension HealthManager {
     func fetchEarliestStepDate(completion: @escaping (Date?) -> Void) {
         let steps = HKQuantityType(.stepCount)

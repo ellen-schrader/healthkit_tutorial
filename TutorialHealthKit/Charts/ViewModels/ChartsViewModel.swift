@@ -179,7 +179,6 @@ class ChartsViewModel: ObservableObject {
         let totalSteps = data.reduce(0.0, {$0 + $1.cumSum})
         let totalDays = data.reduce(0, {$0 + $1.daysInPeriod})
         let averageDailySteps = totalDays > 0 ? Double(totalSteps) / Double(totalDays) : 0
-        let dailyMeans = data.map{$0.value}
         let minDailySteps = data.min(by: {$0.minDaily < $1.minDaily})?.minDaily ?? 0
         let maxDailySteps = data.max(by: {$0.maxDaily < $1.maxDaily})?.maxDaily ?? 0
         

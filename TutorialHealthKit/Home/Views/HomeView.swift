@@ -54,10 +54,10 @@ struct HomeView: View {
                         
                         
                         ZStack{
-                            ProgressCircleView(progress: $viewModel.calories, color: .red, goal: 600)
-                            ProgressCircleView(progress: $viewModel.exercise, color: .green, goal: 60)
+                            ProgressCircleView(progress: viewModel.calories, color: .red, goal: 600)
+                            ProgressCircleView(progress: viewModel.exercise, color: .green, goal: 60)
                                 .padding(.all, 20)
-                            ProgressCircleView(progress: $viewModel.stand, color: .blue, goal: 8)
+                            ProgressCircleView(progress: viewModel.stand, color: .blue, goal: 8)
                                 .padding(.all, 40)
                         }
                         .padding(.horizontal)
@@ -72,19 +72,20 @@ struct HomeView: View {
                         Spacer()
                     }
                     .padding(.horizontal)
-                    
                     LazyVGrid(columns: Array(repeating: GridItem(spacing: 10), count: 2)) {
-                        ForEach(viewModel.mockActivities.sorted(by: { $0.id < $1.id })) { activity in
+                        let activityArray = Array(viewModel.activities.values).sorted(by: { $0.id < $1.id })
+                        ForEach(activityArray, id: \.self) { activity in
                             NavigationLink(destination: getDestinationView(for: activity)) {
                                 ActivityCard(activity: activity,
                                              clickable: true,
                                              statistic: activity.statistics.keys.first ?? .duration)
                             }
                             .foregroundStyle(.primary)
-//                            .buttonStyle(PlainButtonStyle())
+                            .id("\(activity.id)-\(activity.statistics)")
                         }
                     }
                     .padding(.horizontal)
+                    .id(viewModel.activityUpdateTrigger)
                 }
             }
             .navigationTitle("Dashboard")
