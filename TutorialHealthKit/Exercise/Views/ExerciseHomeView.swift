@@ -8,20 +8,34 @@ import SwiftUI
 
 struct ExerciseHomeView: View {
     @StateObject var viewModel: ExerciseViewModel = .init()
+    @State private var showingWorkoutSelection = false
    
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading){
-                    Text("Exercise")
-                            .font(.title)
-                            .bold()
-                            .padding(.bottom)
+                    
+                    HStack {
+                        Text("Exercise")
+                                .font(.title)
+                                .bold()
+                            
+                        Spacer()
+                        
+                        Button(action: {
+                            showingWorkoutSelection = true
+                        }) {
+                            Label("Edit", systemImage: "pencil")
+                                .font(.subheadline)
+                                .foregroundColor(.blue)
+                        }
+                        }
+                    .padding(.bottom)
                     
                     VStack(alignment: .leading, spacing: 16){
                         Text("Weekly Stats")
-                                .font(.title2)
+                            .font(.title2)
                         ProportionBarChart(data: viewModel.proportionActivities[.duration] ?? [],
                                            total: "\(viewModel.totals[.duration]?.formattedNumberString() ?? "") min",
                                            goal: "\(viewModel.activityGoal[.duration]?.formattedNumberString() ?? "") min",
@@ -32,17 +46,16 @@ struct ExerciseHomeView: View {
                                                title: "Calories Burned")
                             
                     }.padding(.bottom)
-                        
-                        
                         Text("Categories")
                         .font(.title2)
                         
-                        LazyVGrid(columns: Array(repeating: GridItem(spacing:10), count:2)){
-                            ForEach(viewModel.activities.sorted(by: { $0.id < $1.id })){ activity in
+                        LazyVGrid(columns: Array(repeating: GridItem(spacing:10), count:2)) {
+                            ForEach(viewModel.activities.sorted(by: { $0.id < $1.id }), id: \.id) { activity in
                                 ActivityCard(activity: activity,
                                              statistic: ActivityStatistic.duration)
                             }
                         }
+                        .id("grid-\(viewModel.activities.count)-\(viewModel.activities.map { $0.title }.joined())")
                         .padding(.bottom)
                         
                         
@@ -70,7 +83,14 @@ struct ExerciseHomeView: View {
                     }
                     
                 }
-            }.padding(.horizontal)
+            }
+        .padding(.horizontal)
+        .onAppear {
+               viewModel.refresh()
+           }
+        .sheet(isPresented: $showingWorkoutSelection) {
+                        WorkoutSelectionView(viewModel: viewModel)
+                    }
         }
 }
 

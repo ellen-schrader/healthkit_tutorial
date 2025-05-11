@@ -12,12 +12,6 @@ class ExerciseViewModel: ObservableObject {
     
     let healthManager = HealthManager.shared
 
-    @Published var isLoading: Bool = false
-    
-    @Published var calories: Int = 0
-    @Published var exercise: Int = 0
-    @Published var steps: Int = 0
-    
     @Published var activities: [Activity] = []
     @Published var workouts: [Workout] = []
     
@@ -27,8 +21,73 @@ class ExerciseViewModel: ObservableObject {
     
     @Published var proportionActivities: [ActivityStatistic:[BarChartItem]] = [:]
     
-    private var selectedActivities: [HKWorkoutActivityType] = [.running, .traditionalStrengthTraining, .cooldown, .yoga]
+    @Published var selectedActivities: [HKWorkoutActivityType] = [.running, .traditionalStrengthTraining, .cooldown, .yoga]
+    @Published var availableWorkoutTypes: [HKWorkoutActivityType] = [
+        .running, .walking, .yoga, .traditionalStrengthTraining, 
+        .cooldown, .cycling, .swimming, .hiking]
     
+    
+    private let selectedWorkoutsKey = "SelectedWorkoutTypes"
+    private let defaultWorkoutTypes: [HKWorkoutActivityType] = [.running, .traditionalStrengthTraining, .cooldown, .yoga]
+       
+    init() {
+           loadSelectedWorkouts()
+           if selectedActivities.isEmpty {
+               selectedActivities = defaultWorkoutTypes
+           }
+        
+           Task {
+               do {
+                   try await healthManager.requestAuthorization()
+                   fetchWeekTotalStats()
+                   fetchWorkoutStats(statistics: [.duration, .calories])
+                   fetchRecentWorkouts(month: Date(), numberOfWorkouts: 5)
+               }
+               catch {
+                   print(error.localizedDescription)
+               }
+           }
+       }
+    
+    private func saveSelectedWorkouts() {
+        let rawValues = selectedActivities.map { $0.rawValue }
+        UserDefaults.standard.set(rawValues, forKey: selectedWorkoutsKey)
+        print("Saved workout types: \(selectedActivities.map(\.displayName).joined(separator: ", "))")
+    }
+    
+    private func loadSelectedWorkouts() {
+        if let rawValues = UserDefaults.standard.array(forKey: selectedWorkoutsKey) as? [UInt] {
+            selectedActivities = rawValues.compactMap { HKWorkoutActivityType(rawValue: $0) }
+            print("Loaded workout types: \(selectedActivities.map(\.displayName).joined(separator: ", "))")
+        }
+    }
+    
+    func toggleWorkoutSelection(_ workoutType: HKWorkoutActivityType) {
+        print("Toggling workout type: \(workoutType.displayName)")
+        if self.selectedActivities.contains(workoutType) {
+            self.selectedActivities.removeAll { $0 == workoutType }
+        } else {
+            self.selectedActivities.append(workoutType)
+        }
+        
+        saveSelectedWorkouts()
+
+        print("Selected workout types: \(selectedActivities.map(\.displayName).joined(separator: ", "))")
+        self.activities.removeAll()
+        self.fetchWorkoutStats(statistics: [.duration, .calories])
+    }
+    
+    func isWorkoutTypeSelected(_ workoutType: HKWorkoutActivityType) -> Bool {
+        return self.selectedActivities.contains(workoutType)
+    }
+    
+    func resetToDefaultWorkoutTypes() {
+        selectedActivities = defaultWorkoutTypes
+        saveSelectedWorkouts()
+        self.activities.removeAll()
+        self.fetchWorkoutStats(statistics: [.duration, .calories])
+    }
+
 
     @Published var mockActivities: [Activity] = [
         Activity(id: "0",
@@ -59,7 +118,13 @@ class ExerciseViewModel: ObservableObject {
         .init(id: 3, name: "Missing", size: 0.2, color:  .gray.opacity(0.2))
     ]
     
-    init() {
+
+    
+    func refresh(){
+        DispatchQueue.main.async{
+            self.activities.removeAll()
+            self.workouts.removeAll()
+        }
         Task {
             do{
                 try await healthManager.requestAuthorization()
@@ -71,19 +136,8 @@ class ExerciseViewModel: ObservableObject {
                 print(error.localizedDescription)
             }
         }
-        
     }
     
-    func fetchTodayCaloriesBurned() {
-        healthManager.fetchHKStatistic(statistic: .caloriesBurned, startDate: .startOfDay, endDate: Date()) { result in
-            switch result {
-            case .success(let calories):
-                self.calories = Int(calories)
-            case .failure(let error):
-                print("Error fetching calories: \(error)")
-            }
-        }
-    }
     
     //MARK: Fitness Activity
     
@@ -116,18 +170,47 @@ class ExerciseViewModel: ObservableObject {
             case .success(let stats):
                 DispatchQueue.main.async {
                     self.activities = stats
+                    let includedActivities = Set(self.activities.map { $0.title })
+                    let zeroActivities = self.selectedActivities.filter { workoutType in
+                        !includedActivities.contains(workoutType.displayName)
+                    }
+                    print(self.activities.map{$0.title})
+                    print(self.activities)
+                    for hkWorkoutType in zeroActivities {
+                        self.activities.append(self.createZeroActivity(for: hkWorkoutType))
+                    }
+                    
                     for statistic in statistics {
-                        self.getProportionWorkouts(statistic: statistic)
+                        self.calculateProportions(statistic: statistic)
                     }
                 }
             case .failure(let error):
                 print("Error fetching workout stats: \(error)")
+                DispatchQueue.main.async {
+                    for hkWorkoutType in self.selectedActivities {
+                        self.activities.append(self.createZeroActivity(for: hkWorkoutType))
+                    }
+                    for statistic in statistics {
+                        self.calculateProportions(statistic: statistic)
+                    }
+                }
             }
         }
     }
     
-    func getProportionWorkouts(statistic: ActivityStatistic = ActivityStatistic.duration){
-        if self.activities == [] {
+    private func createZeroActivity(for workoutType: HKWorkoutActivityType) -> Activity {
+        return Activity(
+            id: "default-\(workoutType.rawValue)",
+            type: .exercise,
+            title: workoutType.displayName,
+            imageName: workoutType.imageName,
+            tintColor: workoutType.color,
+            statistics: [.duration: 0.0, .calories: 0.0]
+        )
+    }
+    
+    func calculateProportions(statistic: ActivityStatistic) {
+        if self.activities.isEmpty {
             return
         }
         
@@ -136,35 +219,38 @@ class ExerciseViewModel: ObservableObject {
         let goal: Double = self.activityGoal[statistic] ?? 100
         
         var proportionWorkouts: [BarChartItem] = self.activities.enumerated().map { index, activity in
-            let barChartItem: BarChartItem
-            barChartItem = BarChartItem(
+            let value = activity.statistics[statistic] ?? 0.0
+            return BarChartItem(
                 id: index,
                 name: activity.title,
-                size: (activity.statistics[statistic] ?? 0.0)/total,
+                size: value / goal,
                 color: activity.tintColor
             )
-            return barChartItem
         }
         
-        let otherWorkouts: BarChartItem = BarChartItem(
-            id: self.activities.count,
-            name: "Other",
-            size: (total - totalSelectedWorkouts)/goal,
-            color: .gray
-        )
+        let otherValue = total - totalSelectedWorkouts
+        if otherValue > 0 {
+            let otherWorkouts: BarChartItem = BarChartItem(
+                id: self.activities.count,
+                name: "Other",
+                size: otherValue / goal,
+                color: .gray
+            )
+            proportionWorkouts.append(otherWorkouts)
+        }
         
-        let missing: BarChartItem = BarChartItem(
-            id: self.activities.count + 1,
-            name: "Missing",
-            size: total < goal ? (goal - total)/goal :0.0,
-            color: .gray.opacity(0.2)
-        )
+        let missingValue = goal - total
+        if missingValue > 0 {
+            let missing: BarChartItem = BarChartItem(
+                id: self.activities.count + 1,
+                name: "Missing",
+                size: missingValue / goal,
+                color: .gray.opacity(0.2)
+            )
+            proportionWorkouts.append(missing)
+        }
         
-        proportionWorkouts.append(otherWorkouts)
-        proportionWorkouts.append(missing)
-        
-        print(proportionWorkouts)
-        
+        print("Bar chart items for \(statistic):")
         self.proportionActivities[statistic] = proportionWorkouts
     }
     
